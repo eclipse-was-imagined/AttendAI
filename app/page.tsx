@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion"
 import type { Variants } from "framer-motion"
-import { Shield, GraduationCap, BookOpen, ArrowRight, Fingerprint, MapPin, QrCode, Settings2 } from "lucide-react"
+import { Shield, GraduationCap, BookOpen, ArrowRight, Fingerprint, MapPin, QrCode, Settings2, PlayCircle } from "lucide-react"
 import Link from "next/link"
 import { AppHeader, OfflineIndicator } from "@/components/attendance/shared"
 
@@ -167,6 +167,10 @@ export default function WelcomePage() {
                 </motion.div>
               ))}
             </motion.div>
+
+            <Link href="/demo" className="flex w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm font-semibold text-primary shadow-sm transition-all hover:bg-primary/15 hover:shadow-md">
+              <PlayCircle className="h-4 w-4" /> Try Interactive Demo
+            </Link>
 
             <Link href="/admin" className="flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-primary">
               <Settings2 className="h-3.5 w-3.5" /> College administrator? Set up your workspace
