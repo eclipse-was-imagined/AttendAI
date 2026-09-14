@@ -1,5 +1,7 @@
 AttendAI is a multi-college QR, GPS, and face-verification attendance app built with Next.js and Supabase.
 
+Use `npm run dev` for normal local development. Use `npm run dev:https` only when testing camera/GPS from another phone or PC; it requires the local HTTPS certificate helper to be writable.
+
 ## Multi-college setup
 
 1. Configure `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`.

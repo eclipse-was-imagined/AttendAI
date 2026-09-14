@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbo --experimental-https",
+    "dev": "next dev --turbo",
     "dev:fast": "next dev --turbo",
+    "dev:https": "next dev --turbo --experimental-https",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

@@ -265,7 +265,7 @@ export default function TeacherDashboard() {
 
   const startSession = async () => {
     if (!isSupabaseConfigured || !supabase) { setSessionId(`demo-${Date.now()}`); return }
-    if (!selectedClassId) { setAuthError("Select a class before starting attendance"); return }
+    if (classes.length > 0 && !selectedClassId) { setAuthError("Select a class before starting attendance"); return }
 
     setIsGettingLocation(true)
     const location = await getLocation()
@@ -274,13 +274,14 @@ export default function TeacherDashboard() {
 
     const startsAt = new Date()
     const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000)
-    const insertData: any = { faculty_id: facultyId, class_id: selectedClassId, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), late_after_minutes: lateAfterMinutes, ...(collegeId ? { college_id: collegeId } : {}) }
+    const insertData: any = { faculty_id: facultyId, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), late_after_minutes: lateAfterMinutes, ...(selectedClassId ? { class_id: selectedClassId } : {}), ...(collegeId ? { college_id: collegeId } : {}) }
     if (location) {
       insertData.latitude = location.lat
       insertData.longitude = location.lng
     }
 
-    const { data } = await supabase.from("sessions").insert(insertData).select().single()
+    const { data, error } = await supabase.from("sessions").insert(insertData).select().single()
+    if (error) { setAuthError(error.message); return }
     if (data) { setSessionId(data.id); setSessionEndsAt(data.ends_at || endsAt.toISOString()); setAuthError("") }
   }
 
@@ -472,7 +473,7 @@ export default function TeacherDashboard() {
               </div>
               <div className="flex items-center gap-2"><Link href="/teacher/classes" className="rounded-xl border border-border px-3 py-2 text-xs font-medium hover:bg-muted">Classes</Link><Link href="/teacher/analytics" className="rounded-xl border border-border px-3 py-2 text-xs font-medium hover:bg-muted">Analytics</Link><RippleButton variant="outline" size="sm" className="gap-1.5" onClick={handleLogout}><LogOut className="h-4 w-4" /> Logout</RippleButton></div>
             </div>
-            {isSupabaseConfigured && <div className="rounded-2xl border border-border/50 bg-card/50 p-4"><label htmlFor="attendance-class" className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Attendance class</label><select id="attendance-class" value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} disabled={Boolean(sessionId)} className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"><option value="">{classes.length ? "Select a class" : "No classes assigned"}</option>{classes.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.name} ({classItem.code})</option>)}</select>{!selectedClassId && <p className="mt-2 text-xs text-muted-foreground">Choose the class whose students should be allowed to mark attendance.</p>}</div>}
+            {isSupabaseConfigured && <div className="rounded-2xl border border-border/50 bg-card/50 p-4"><label htmlFor="attendance-class" className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Attendance class</label><select id="attendance-class" value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} disabled={Boolean(sessionId)} className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"><option value="">{classes.length ? "Select a class" : "No classes assigned — legacy session"}</option>{classes.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.name} ({classItem.code})</option>)}</select>{classes.length > 0 && !selectedClassId && <p className="mt-2 text-xs text-muted-foreground">Choose the class whose students should be allowed to mark attendance.</p>}{classes.length === 0 && <p className="mt-2 text-xs text-muted-foreground">You can still start a legacy session. Create and assign a class to enable class-restricted attendance.</p>}</div>}
             {isSupabaseConfigured && !sessionId && <div className="grid gap-3 rounded-2xl border border-border/50 bg-card/50 p-4 sm:grid-cols-2"><label className="text-xs font-medium text-muted-foreground">Session duration (minutes)<input type="number" min={5} max={480} value={durationMinutes} onChange={(e) => setDurationMinutes(Math.max(5, Number(e.target.value) || 5))} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground" /></label><label className="text-xs font-medium text-muted-foreground">Mark late after (minutes)<input type="number" min={0} max={durationMinutes} value={lateAfterMinutes} onChange={(e) => setLateAfterMinutes(Math.max(0, Math.min(durationMinutes, Number(e.target.value) || 0)))} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground" /></label></div>}
             <Card className="relative overflow-hidden rounded-3xl border border-border/40 bg-card/50 shadow-xl backdrop-blur-xl">
               <CardHeader className="pb-2">
