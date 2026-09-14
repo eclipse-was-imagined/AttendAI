@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Shield, Fingerprint, QrCode, CheckCircle2, XCircle,
@@ -117,12 +118,13 @@ export default function StudentPage() {
   const [verifyStage, setVerifyStage] = useState<VerifyStage>("loading")
   const [errorMessage, setErrorMessage] = useState("")
   const [attendanceTime, setAttendanceTime] = useState("")
+  const [attendanceStatus, setAttendanceStatus] = useState<"present" | "late">("present")
   const [showConfetti, setShowConfetti] = useState(false)
 
   // GPS state
   const [gpsStatus, setGpsStatus] = useState<"checking" | "ok" | "error">("checking")
   const [gpsMessage, setGpsMessage] = useState("Getting your location...")
-  const [sessionPayload, setSessionPayload] = useState<{ session_id: string; lat?: number; lng?: number } | null>(null)
+  const [sessionPayload, setSessionPayload] = useState<{ session_id: string; class_id?: string; status?: "present" | "late"; lat?: number; lng?: number } | null>(null)
 
   // Blink state
   const [blinkDetected, setBlinkDetected] = useState(false)
@@ -382,18 +384,42 @@ export default function StudentPage() {
           // Fetch session GPS data
           let sessionLat: number | undefined
           let sessionLng: number | undefined
+          let sessionClassId: string | undefined
+          let sessionStartsAt: string | undefined
+          let sessionEndsAt: string | undefined
+          let sessionLateAfter = 10
           if (isSupabaseConfigured && supabase) {
             const { data: sessionData } = await supabase
               .from("sessions")
-              .select("latitude, longitude")
+              .select("latitude, longitude, class_id, starts_at, ends_at, late_after_minutes")
               .eq("id", payload.session_id)
               .single()
             sessionLat = sessionData?.latitude
             sessionLng = sessionData?.longitude
+            sessionClassId = sessionData?.class_id
+            sessionStartsAt = sessionData?.starts_at
+            sessionEndsAt = sessionData?.ends_at
+            sessionLateAfter = sessionData?.late_after_minutes ?? 10
+            if (sessionEndsAt && Date.now() >= new Date(sessionEndsAt).getTime()) {
+              setErrorMessage("This attendance session has ended.")
+              setCurrentStep("error")
+              return
+            }
+            if (sessionClassId) {
+              const { data: membership } = await supabase.from("class_students").select("register_no").eq("class_id", sessionClassId).eq("register_no", capturedRegisterNo).maybeSingle()
+              if (!membership) {
+                setErrorMessage("You are not enrolled in the class for this attendance session.")
+                setCurrentStep("error")
+                return
+              }
+            }
           }
 
-          const fullPayload = { session_id: payload.session_id, lat: sessionLat, lng: sessionLng }
+          const isLate = Boolean(sessionEndsAt && sessionStartsAt && Date.now() >= new Date(sessionStartsAt).getTime() + sessionLateAfter * 60_000)
+          const status: "present" | "late" = isLate ? "late" : "present"
+          const fullPayload = { session_id: payload.session_id, class_id: sessionClassId, status, lat: sessionLat, lng: sessionLng }
           setSessionPayload(fullPayload)
+          setAttendanceStatus(status)
 
           // GPS check
           setCurrentStep("gps")
@@ -423,6 +449,7 @@ export default function StudentPage() {
             const { error } = await supabase.from("attendance").insert({
               session_id: payload.session_id,
               register_no: capturedRegisterNo,
+              status,
             })
             if (error) {
               setErrorMessage(error.code === "23505" ? "Attendance already marked for this session" : error.message)
@@ -546,9 +573,7 @@ export default function StudentPage() {
                 <h1 className="text-xl font-bold">Mark Attendance</h1>
                 <p className="text-sm text-muted-foreground">{registerNo ? `Reg: ${registerNo}` : "Demo Mode"}</p>
               </div>
-              <RippleButton variant="outline" size="sm" className="gap-1.5" onClick={handleLogout}>
-                <LogOut className="h-4 w-4" /> Logout
-              </RippleButton>
+              <div className="flex items-center gap-2"><Link href="/student/history" className="rounded-xl border border-border px-3 py-2 text-xs font-medium hover:bg-muted">My attendance</Link><RippleButton variant="outline" size="sm" className="gap-1.5" onClick={handleLogout}><LogOut className="h-4 w-4" /> Logout</RippleButton></div>
             </div>
             <StepIndicator current={currentStep} />
             <Card className="relative overflow-hidden rounded-3xl border border-border/40 bg-card/50 shadow-xl backdrop-blur-xl">
@@ -770,7 +795,7 @@ export default function StudentPage() {
                 </motion.div>
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="flex flex-col items-center gap-2">
                   <Badge variant="outline" className="rounded-full border-green-500/30 bg-green-500/10 px-4 py-1 text-sm text-green-600">
-                    ✓ Verified at {attendanceTime}
+                    ✓ {attendanceStatus === "late" ? "Late attendance" : "Verified"} at {attendanceTime}
                   </Badge>
                   <div className="flex items-center gap-3 mt-1">
                     <span className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3 text-green-500" /> GPS ✓</span>

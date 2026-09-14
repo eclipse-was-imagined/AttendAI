@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AppHeader, OfflineIndicator } from "@/components/attendance/shared"
+import OrganizationBadge from "@/components/attendance/OrganizationBadge"
 import { supabase, isSupabaseConfigured } from "@/lib/supabase"
 
 type RegistrationStatus = "idle" | "processing" | "success" | "error"
@@ -526,7 +527,7 @@ export default function AdminFaceRegistrationPage() {
         <div className="absolute bottom-0 -left-20 h-60 w-60 rounded-full bg-blue-500/10 blur-[80px]" />
       </div>
 
-      <AppHeader title="Admin Panel" />
+      <AppHeader title="Admin Panel" context={<OrganizationBadge />} />
       <OfflineIndicator />
 
       <main className="relative z-10 flex-1 overflow-y-auto">

@@ -1,4 +1,20 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+AttendAI is a multi-college QR, GPS, and face-verification attendance app built with Next.js and Supabase.
+
+## Multi-college setup
+
+1. Configure `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`.
+2. Run [`supabase/migrations/001_multi_tenant.sql`](supabase/migrations/001_multi_tenant.sql) once in the Supabase SQL editor.
+3. Run [`supabase/migrations/002_organization_roles.sql`](supabase/migrations/002_organization_roles.sql) after it completes.
+4. Run [`supabase/migrations/003_class_attendance.sql`](supabase/migrations/003_class_attendance.sql) to enforce class membership for attendance.
+5. Run [`supabase/migrations/004_attendance_timing.sql`](supabase/migrations/004_attendance_timing.sql) for session time limits and late status.
+6. Run [`supabase/migrations/005_attendance_corrections.sql`](supabase/migrations/005_attendance_corrections.sql) for teacher corrections and audit history.
+7. Open `/admin`, create the college admin workspace, and import CSV files.
+
+Student CSV headers: `register_no,name,email`
+
+Faculty CSV headers: `faculty_id,name,email`
+
+The migration adds college ownership and Row Level Security. Existing rows with no `college_id` need to be assigned to a college before they become visible under the protected policies. Do not put passwords or face images in CSV files; students and faculty still use Supabase Auth accounts, while face embeddings are registered through the existing admin face-registration screen.
 
 ## Getting Started
 

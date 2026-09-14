@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
+import type { ReactNode } from "react"
 
 // =============================================================================
 // SecurityBadges
@@ -48,7 +49,7 @@ export function SecurityBadges() {
 // AppHeader
 // =============================================================================
 
-export function AppHeader({ title = "SecureAttend" }: { title?: string }) {
+export function AppHeader({ title = "SecureAttend", context }: { title?: string; context?: ReactNode }) {
   const { theme, setTheme } = useTheme()
 
   return (
@@ -59,16 +60,19 @@ export function AppHeader({ title = "SecureAttend" }: { title?: string }) {
         </div>
         <span className="text-lg font-semibold text-foreground">{title}</span>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        aria-label="Toggle theme"
-        className="h-9 w-9 rounded-xl"
-      >
-        <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-        <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-      </Button>
+      <div className="flex items-center gap-2">
+        {context}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          aria-label="Toggle theme"
+          className="h-9 w-9 rounded-xl"
+        >
+          <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+          <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+        </Button>
+      </div>
     </header>
   )
 }

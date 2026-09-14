@@ -3,6 +3,7 @@
 import Confetti from "@/components/Confetti"
 import { useState, useEffect, useRef, useMemo } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
 import { QRCodeCanvas } from "qrcode.react"
 import {
@@ -22,8 +23,10 @@ type ViewMode = "qr" | "sessions" | "details" | "goodbye"
 type SortField = "register_no" | "scanned_at"
 type SortDir = "asc" | "desc"
 
-interface Session { id: string; faculty_id: string; created_at: string; latitude?: number; longitude?: number }
-interface AttendanceRecord { id: string; session_id: string; register_no: string; scanned_at: string }
+interface Session { id: string; faculty_id: string; college_id?: string; class_id?: string; created_at: string; starts_at?: string; ends_at?: string; late_after_minutes?: number; latitude?: number; longitude?: number }
+interface ClassRecord { id: string; name: string; code: string; teacher_faculty_id: string }
+interface AttendanceRecord { id: string; session_id: string; register_no: string; scanned_at: string; status?: "present" | "late" }
+interface Correction { id: string; attendance_id: string; old_status: string; new_status: string; reason: string; created_at: string }
 
 const GPS_THRESHOLD = 150 // meters — matches student page
 
@@ -132,6 +135,11 @@ export default function TeacherDashboard() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [facultyId, setFacultyId] = useState("")
+  const [collegeId, setCollegeId] = useState<string | null>(null)
+  const [classes, setClasses] = useState<ClassRecord[]>([])
+  const [selectedClassId, setSelectedClassId] = useState("")
+  const [durationMinutes, setDurationMinutes] = useState(60)
+  const [lateAfterMinutes, setLateAfterMinutes] = useState(10)
   const [authError, setAuthError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
@@ -140,10 +148,13 @@ export default function TeacherDashboard() {
   const [qrValue, setQrValue] = useState("")
   const [sessions, setSessions] = useState<Session[]>([])
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([])
+  const [corrections, setCorrections] = useState<Correction[]>([])
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoadingSessions, setIsLoadingSessions] = useState(false)
   const [sessionLocation, setSessionLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [sessionEndsAt, setSessionEndsAt] = useState<string | null>(null)
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
   const [isGettingLocation, setIsGettingLocation] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState("")
@@ -168,6 +179,21 @@ export default function TeacherDashboard() {
   }, [sessionId])
 
   useEffect(() => {
+    if (!sessionEndsAt) { setRemainingSeconds(null); return }
+    const updateCountdown = () => {
+      const seconds = Math.max(0, Math.ceil((new Date(sessionEndsAt).getTime() - Date.now()) / 1000))
+      setRemainingSeconds(seconds)
+      if (seconds === 0) {
+        setSessionId(null); setQrValue(""); setSessionLocation(null); setSessionEndsAt(null)
+        setAuthError("Session ended. Start a new session when you are ready.")
+      }
+    }
+    updateCountdown()
+    const timer = setInterval(updateCountdown, 1000)
+    return () => clearInterval(timer)
+  }, [sessionEndsAt])
+
+  useEffect(() => {
     return () => { if (realtimeChannelRef.current && supabase) supabase.removeChannel(realtimeChannelRef.current) }
   }, [])
 
@@ -179,7 +205,7 @@ export default function TeacherDashboard() {
       if (!navigator.geolocation) { resolve(null); return }
 
       const readings: GeolocationPosition[] = []
-      const MAX_READINGS = 3
+      const MAX_READINGS = 2
 
       const tryRead = () => {
         navigator.geolocation.getCurrentPosition(
@@ -206,7 +232,7 @@ export default function TeacherDashboard() {
               resolve(null)
             }
           },
-          { timeout: 12000, maximumAge: 0, enableHighAccuracy: true }
+          { timeout: 6000, maximumAge: 0, enableHighAccuracy: true }
         )
       }
 
@@ -222,6 +248,13 @@ export default function TeacherDashboard() {
       if (authError) { setAuthError(authError.message); return }
       const { data } = await supabase.from("teachers").select("*").eq("email", email).eq("faculty_id", facultyId).single()
       if (!data) { setAuthError("Faculty ID does not match this email"); return }
+      setCollegeId(data.college_id ?? null)
+      if (data.college_id) {
+        const { data: classRows } = await supabase.from("classes").select("id, name, code, teacher_faculty_id").eq("college_id", data.college_id).eq("teacher_faculty_id", data.faculty_id).order("name")
+        const availableClasses = (classRows as ClassRecord[]) || []
+        setClasses(availableClasses)
+        if (availableClasses.length === 1) setSelectedClassId(availableClasses[0].id)
+      }
       setLoggedIn(true)
     } catch (err: any) {
       setAuthError(err?.message || "Something went wrong. Please try again.")
@@ -232,23 +265,26 @@ export default function TeacherDashboard() {
 
   const startSession = async () => {
     if (!isSupabaseConfigured || !supabase) { setSessionId(`demo-${Date.now()}`); return }
+    if (!selectedClassId) { setAuthError("Select a class before starting attendance"); return }
 
     setIsGettingLocation(true)
     const location = await getLocation()
     setIsGettingLocation(false)
     setSessionLocation(location)
 
-    const insertData: any = { faculty_id: facultyId }
+    const startsAt = new Date()
+    const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000)
+    const insertData: any = { faculty_id: facultyId, class_id: selectedClassId, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), late_after_minutes: lateAfterMinutes, ...(collegeId ? { college_id: collegeId } : {}) }
     if (location) {
       insertData.latitude = location.lat
       insertData.longitude = location.lng
     }
 
     const { data } = await supabase.from("sessions").insert(insertData).select().single()
-    if (data) setSessionId(data.id)
+    if (data) { setSessionId(data.id); setSessionEndsAt(data.ends_at || endsAt.toISOString()); setAuthError("") }
   }
 
-  const endSession = () => { setSessionId(null); setQrValue(""); setSessionLocation(null) }
+  const endSession = () => { setSessionId(null); setQrValue(""); setSessionLocation(null); setSessionEndsAt(null); setRemainingSeconds(null) }
 
   const loadSessions = async () => {
     setIsLoadingSessions(true)
@@ -273,7 +309,12 @@ export default function TeacherDashboard() {
       setView("details"); return
     }
     const { data } = await supabase.from("attendance").select("*").eq("session_id", session.id).order("scanned_at", { ascending: true })
-    setAttendance(data || [])
+    const attendanceRows = (data as AttendanceRecord[]) || []
+    setAttendance(attendanceRows)
+    if (attendanceRows.length) {
+      const { data: correctionRows } = await supabase.from("attendance_corrections").select("*").in("attendance_id", attendanceRows.map((row) => row.id)).order("created_at", { ascending: false })
+      setCorrections((correctionRows as Correction[]) || [])
+    } else setCorrections([])
     setView("details")
 
     if (realtimeChannelRef.current) await supabase.removeChannel(realtimeChannelRef.current)
@@ -295,12 +336,33 @@ export default function TeacherDashboard() {
     setIsRefreshing(true)
     const { data } = await supabase.from("attendance").select("*").eq("session_id", selectedSession.id).order("scanned_at", { ascending: true })
     setAttendance(data || [])
+    const refreshed = (data as AttendanceRecord[]) || []
+    if (refreshed.length) {
+      const { data: correctionRows } = await supabase.from("attendance_corrections").select("*").in("attendance_id", refreshed.map((row) => row.id)).order("created_at", { ascending: false })
+      setCorrections((correctionRows as Correction[]) || [])
+    } else setCorrections([])
     setIsRefreshing(false)
   }
 
+  const correctAttendance = async (record: AttendanceRecord) => {
+    if (!supabase || !selectedSession) return
+    const oldStatus = record.status || "present"
+    const newStatus = oldStatus === "late" ? "present" : "late"
+    const reason = window.prompt(`Why should this be marked ${newStatus}?`)
+    if (!reason?.trim()) return
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth.user) return
+    const { error: updateError } = await supabase.from("attendance").update({ status: newStatus }).eq("id", record.id)
+    if (updateError) { setAuthError(updateError.message); return }
+    const { error: auditError } = await supabase.from("attendance_corrections").insert({ attendance_id: record.id, college_id: selectedSession.college_id || collegeId, changed_by: auth.user.id, old_status: oldStatus, new_status: newStatus, reason: reason.trim() })
+    if (auditError) { setAuthError(auditError.message); return }
+    setAttendance((previous) => previous.map((item) => item.id === record.id ? { ...item, status: newStatus } : item))
+    setCorrections((previous) => [{ id: `local-${Date.now()}`, attendance_id: record.id, old_status: oldStatus, new_status: newStatus, reason: reason.trim(), created_at: new Date().toISOString() }, ...previous])
+  }
+
   const exportCSV = () => {
-    const header = "Register Number,Scanned At\n"
-    const rows = attendance.map((a) => `${a.register_no},${a.scanned_at}`).join("\n")
+    const header = "Register Number,Scanned At,Status\n"
+    const rows = attendance.map((a) => `${a.register_no},${a.scanned_at},${a.status || "present"}`).join("\n")
     const blob = new Blob([header + rows], { type: "text/csv" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a"); a.href = url; a.download = `attendance-${selectedSession?.id}.csv`; a.click()
@@ -311,7 +373,7 @@ export default function TeacherDashboard() {
     setView("goodbye")
     setTimeout(async () => {
       if (isSupabaseConfigured && supabase) await supabase.auth.signOut()
-      setLoggedIn(false); setView("qr"); setSessionId(null); setAttendance([]); setSelectedSession(null)
+      setLoggedIn(false); setView("qr"); setSessionId(null); setAttendance([]); setSelectedSession(null); setCollegeId(null); setClasses([]); setSelectedClassId(""); setSessionEndsAt(null); setRemainingSeconds(null)
     }, 3500)
   }
 
@@ -408,10 +470,10 @@ export default function TeacherDashboard() {
                 <h1 className="text-xl font-bold">Teacher Dashboard</h1>
                 <p className="text-sm text-muted-foreground">Faculty ID: {facultyId || "Demo Mode"}</p>
               </div>
-              <RippleButton variant="outline" size="sm" className="gap-1.5" onClick={handleLogout}>
-                <LogOut className="h-4 w-4" /> Logout
-              </RippleButton>
+              <div className="flex items-center gap-2"><Link href="/teacher/classes" className="rounded-xl border border-border px-3 py-2 text-xs font-medium hover:bg-muted">Classes</Link><Link href="/teacher/analytics" className="rounded-xl border border-border px-3 py-2 text-xs font-medium hover:bg-muted">Analytics</Link><RippleButton variant="outline" size="sm" className="gap-1.5" onClick={handleLogout}><LogOut className="h-4 w-4" /> Logout</RippleButton></div>
             </div>
+            {isSupabaseConfigured && <div className="rounded-2xl border border-border/50 bg-card/50 p-4"><label htmlFor="attendance-class" className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Attendance class</label><select id="attendance-class" value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} disabled={Boolean(sessionId)} className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"><option value="">{classes.length ? "Select a class" : "No classes assigned"}</option>{classes.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.name} ({classItem.code})</option>)}</select>{!selectedClassId && <p className="mt-2 text-xs text-muted-foreground">Choose the class whose students should be allowed to mark attendance.</p>}</div>}
+            {isSupabaseConfigured && !sessionId && <div className="grid gap-3 rounded-2xl border border-border/50 bg-card/50 p-4 sm:grid-cols-2"><label className="text-xs font-medium text-muted-foreground">Session duration (minutes)<input type="number" min={5} max={480} value={durationMinutes} onChange={(e) => setDurationMinutes(Math.max(5, Number(e.target.value) || 5))} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground" /></label><label className="text-xs font-medium text-muted-foreground">Mark late after (minutes)<input type="number" min={0} max={durationMinutes} value={lateAfterMinutes} onChange={(e) => setLateAfterMinutes(Math.max(0, Math.min(durationMinutes, Number(e.target.value) || 0)))} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground" /></label></div>}
             <Card className="relative overflow-hidden rounded-3xl border border-border/40 bg-card/50 shadow-xl backdrop-blur-xl">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -431,7 +493,7 @@ export default function TeacherDashboard() {
                     </motion.div>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Clock className="h-4 w-4" />
-                      <span>Refreshes every 10 seconds</span>
+                      <span>Refreshes every 10 seconds{sessionEndsAt ? ` · closes ${new Date(sessionEndsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}{remainingSeconds !== null ? ` · ${Math.floor(remainingSeconds / 60)}m ${remainingSeconds % 60}s left` : ""}</span>
                     </div>
                     {sessionLocation ? (
                       <div className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-3 py-1 text-xs text-green-600">
@@ -600,18 +662,19 @@ export default function TeacherDashboard() {
                         {sortField === "register_no" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-50" />}
                       </div>
                     </TableHead>
-                    <TableHead className="cursor-pointer text-right" onClick={() => toggleSort("scanned_at")}>
+                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort("scanned_at")}>
                       <div className="flex items-center justify-end gap-1">
                         Time
                         {sortField === "scanned_at" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-50" />}
                       </div>
                     </TableHead>
+                    <TableHead className="text-right">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {paginatedAttendance.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={2} className="text-center py-8 text-muted-foreground">No attendance records</TableCell>
+                      <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No attendance records</TableCell>
                     </TableRow>
                   ) : (
                     paginatedAttendance.map((record) => (
@@ -621,6 +684,7 @@ export default function TeacherDashboard() {
                         <TableCell className="text-right text-muted-foreground">
                           {new Date(record.scanned_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
                         </TableCell>
+                        <TableCell className="text-right"><button onClick={() => correctAttendance(record)} className={`text-xs font-medium underline-offset-2 hover:underline ${record.status === "late" ? "text-yellow-600" : "text-green-600"}`} title="Correct attendance status">{record.status === "late" ? "Late" : "Present"}</button></TableCell>
                       </motion.tr>
                     ))
                   )}
@@ -628,6 +692,8 @@ export default function TeacherDashboard() {
               </Table>
             </CardContent>
           </Card>
+
+          {corrections.length > 0 && <Card className="relative overflow-hidden rounded-2xl border border-border/40 bg-card/40 shadow-lg backdrop-blur-xl"><CardHeader><CardTitle className="text-base">Correction history</CardTitle></CardHeader><CardContent className="space-y-2">{corrections.map((correction) => <div key={correction.id} className="rounded-xl bg-muted/30 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="font-medium">{correction.old_status} → {correction.new_status}</span><span className="text-muted-foreground">{new Date(correction.created_at).toLocaleString()}</span></div><p className="mt-1 text-muted-foreground">{correction.reason}</p></div>)}</CardContent></Card>}
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between">
